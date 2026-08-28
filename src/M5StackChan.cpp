@@ -60,13 +60,13 @@ void M5StackChan_Class::io_expander_init()
     if (_io_expander) {
         // VM EN
         _io_expander->setDirection(0, true);  // Output
-        _io_expander->setPullMode(0, true);   // Pull-up
+        _io_expander->setPullMode(0, PY32IOExpander_Class::pull_up);
         setServoPowerEnabled(true);
         delay(200);
 
         // RGB
-        _io_expander->setDirection(13, true);   // Output
-        _io_expander->setPullMode(13, true);    // Pull-up
+        _io_expander->setDirection(13, true);  // Output
+        _io_expander->setPullMode(13, PY32IOExpander_Class::pull_up);
         _io_expander->setDriveMode(13, false);  // Push-pull
         _io_expander->setLedCount(12);
         delay(200);
