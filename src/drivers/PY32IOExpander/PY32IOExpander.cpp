@@ -49,19 +49,12 @@ static constexpr uint8_t REG_PWM3_DUTY_H = 0x20;
 static constexpr uint8_t REG_PWM4_DUTY_L = 0x21;
 static constexpr uint8_t REG_PWM4_DUTY_H = 0x22;
 
-void PY32IOExpander_Class::_writeBit(uint8_t reg_l, uint8_t reg_h, uint8_t pin, bool value)
+bool PY32IOExpander_Class::_writeBit(uint8_t reg_l, uint8_t reg_h, uint8_t pin, bool value)
 {
     if (pin < 8) {
-        if (value)
-            bitOn(reg_l, 1 << pin);
-        else
-            bitOff(reg_l, 1 << pin);
-    } else {
-        if (value)
-            bitOn(reg_h, 1 << (pin - 8));
-        else
-            bitOff(reg_h, 1 << (pin - 8));
+        return value ? bitOn(reg_l, 1 << pin) : bitOff(reg_l, 1 << pin);
     }
+    return value ? bitOn(reg_h, 1 << (pin - 8)) : bitOff(reg_h, 1 << (pin - 8));
 }
 
 bool PY32IOExpander_Class::_readBit(uint8_t reg_l, uint8_t reg_h, uint8_t pin)
@@ -80,94 +73,132 @@ bool PY32IOExpander_Class::begin()
     return true;
 }
 
-void PY32IOExpander_Class::setDirection(uint8_t pin, bool direction)
+bool PY32IOExpander_Class::_setDirection(uint8_t pin, bool direction)
 {
     // direction: false=input (0), true=output (1)
-    _writeBit(REG_GPIO_M_L, REG_GPIO_M_H, pin, direction);
+    if (!_isValidPin(pin)) return false;
+    return _writeBit(REG_GPIO_M_L, REG_GPIO_M_H, pin, direction);
 }
 
-void PY32IOExpander_Class::enablePull(uint8_t pin, bool enablePull)
+bool PY32IOExpander_Class::_setPullMode(uint8_t pin, gpio_pull_t mode)
 {
-    if (enablePull) {
-        // Enable Pull Up by default if neither is set
-        bool pu = _readBit(REG_GPIO_PU_L, REG_GPIO_PU_H, pin);
-        bool pd = _readBit(REG_GPIO_PD_L, REG_GPIO_PD_H, pin);
-        if (!pu && !pd) {
-            _writeBit(REG_GPIO_PU_L, REG_GPIO_PU_H, pin, true);
+    if (!_isValidPin(pin)) return false;
+    switch (mode) {
+        case pull_none: {
+            bool pu_ok = _writeBit(REG_GPIO_PU_L, REG_GPIO_PU_H, pin, false);
+            bool pd_ok = _writeBit(REG_GPIO_PD_L, REG_GPIO_PD_H, pin, false);
+            return pu_ok && pd_ok;
         }
-        // If one is already set, leave it.
-    } else {
-        // Disable both
-        _writeBit(REG_GPIO_PU_L, REG_GPIO_PU_H, pin, false);
-        _writeBit(REG_GPIO_PD_L, REG_GPIO_PD_H, pin, false);
-    }
-}
-
-void PY32IOExpander_Class::setPullMode(uint8_t pin, bool mode)
-{
-    // mode: false=down, true=up
-    if (mode) {
-        // Pull Up
-        _writeBit(REG_GPIO_PD_L, REG_GPIO_PD_H, pin, false);
-        _writeBit(REG_GPIO_PU_L, REG_GPIO_PU_H, pin, true);
-    } else {
-        // Pull Down
-        _writeBit(REG_GPIO_PU_L, REG_GPIO_PU_H, pin, false);
-        _writeBit(REG_GPIO_PD_L, REG_GPIO_PD_H, pin, true);
+        case pull_up: {
+            bool pd_ok = _writeBit(REG_GPIO_PD_L, REG_GPIO_PD_H, pin, false);
+            bool pu_ok = _writeBit(REG_GPIO_PU_L, REG_GPIO_PU_H, pin, true);
+            return pd_ok && pu_ok;
+        }
+        case pull_down: {
+            bool pu_ok = _writeBit(REG_GPIO_PU_L, REG_GPIO_PU_H, pin, false);
+            bool pd_ok = _writeBit(REG_GPIO_PD_L, REG_GPIO_PD_H, pin, true);
+            return pu_ok && pd_ok;
+        }
+        default:
+            return false;
     }
 }
 
 void PY32IOExpander_Class::setDriveMode(uint8_t pin, bool openDrain)
 {
     // openDrain: false=push-pull (0), true=open-drain (1)
+    if (!_isValidPin(pin)) return;
     _writeBit(REG_GPIO_DRV_L, REG_GPIO_DRV_H, pin, openDrain);
 }
 
-void PY32IOExpander_Class::setHighImpedance(uint8_t pin, bool enable)
+bool PY32IOExpander_Class::_setHighImpedance(uint8_t pin, bool enable)
 {
-    if (enable) {
-        // Input mode
-        setDirection(pin, false);
-        // Disable pulls
-        enablePull(pin, false);
-    }
+    if (!_isValidPin(pin)) return false;
+    if (!enable) return true;
+    // Input mode with the pulls disabled
+    bool dir_ok  = _setDirection(pin, false);
+    bool pull_ok = _setPullMode(pin, pull_none);
+    return dir_ok && pull_ok;
 }
 
 bool PY32IOExpander_Class::getWriteValue(uint8_t pin)
 {
+    if (!_isValidPin(pin)) return false;
     return _readBit(REG_GPIO_O_L, REG_GPIO_O_H, pin);
 }
 
-void PY32IOExpander_Class::digitalWrite(uint8_t pin, bool level)
+bool PY32IOExpander_Class::_digitalWrite(uint8_t pin, bool level)
 {
-    _writeBit(REG_GPIO_O_L, REG_GPIO_O_H, pin, level);
+    if (!_isValidPin(pin)) return false;
+    return _writeBit(REG_GPIO_O_L, REG_GPIO_O_H, pin, level);
 }
 
 bool PY32IOExpander_Class::digitalRead(uint8_t pin)
 {
+    if (!_isValidPin(pin)) return false;
     return _readBit(REG_GPIO_I_L, REG_GPIO_I_H, pin);
 }
 
-void PY32IOExpander_Class::resetIrq()
+bool PY32IOExpander_Class::_resetIrq()
 {
     // Clear all interrupts by writing 1s to IS registers
-    writeRegister8(REG_GPIO_IS_L, 0xFF);
-    writeRegister8(REG_GPIO_IS_H, 0xFF);  // Only bits 0-5 used for high byte (pins 8-13)
+    bool l_ok = writeRegister8(REG_GPIO_IS_L, 0xFF);
+    bool h_ok = writeRegister8(REG_GPIO_IS_H, 0xFF);  // Only bits 0-5 used for high byte (pins 8-13)
+    return l_ok && h_ok;
 }
 
-void PY32IOExpander_Class::disableIrq()
+bool PY32IOExpander_Class::_disableIrq()
 {
     // Disable all interrupts
-    writeRegister8(REG_GPIO_IE_L, 0x00);
-    writeRegister8(REG_GPIO_IE_H, 0x00);
+    bool l_ok = writeRegister8(REG_GPIO_IE_L, 0x00);
+    bool h_ok = writeRegister8(REG_GPIO_IE_H, 0x00);
+    return l_ok && h_ok;
 }
 
-void PY32IOExpander_Class::enableIrq()
+bool PY32IOExpander_Class::_enableIrq()
 {
     // Enable all interrupts
-    writeRegister8(REG_GPIO_IE_L, 0xFF);
-    writeRegister8(REG_GPIO_IE_H, 0x3F);  // Pins 8-13
+    bool l_ok = writeRegister8(REG_GPIO_IE_L, 0xFF);
+    bool h_ok = writeRegister8(REG_GPIO_IE_H, 0x3F);  // Pins 8-13
+    return l_ok && h_ok;
 }
+
+void PY32IOExpander_Class::enablePull(uint8_t pin, bool enablePull)
+{
+    if (!_isValidPin(pin)) return;
+    if (enablePull) {
+        // Enable Pull Up by default if neither is set
+        bool pu = _readBit(REG_GPIO_PU_L, REG_GPIO_PU_H, pin);
+        bool pd = _readBit(REG_GPIO_PD_L, REG_GPIO_PD_H, pin);
+        if (!pu && !pd) {
+            _setPullMode(pin, pull_up);
+        }
+        // If one is already set, leave it.
+    } else {
+        _setPullMode(pin, pull_none);
+    }
+}
+
+#if PY32IOEXPANDER_STATUS_API
+bool PY32IOExpander_Class::setDirection(uint8_t pin, bool direction) { return _setDirection(pin, direction); }
+bool PY32IOExpander_Class::setPullMode(uint8_t pin, gpio_pull_t mode) { return _setPullMode(pin, mode); }
+bool PY32IOExpander_Class::setPullMode(uint8_t pin, bool mode) { return _setPullMode(pin, mode ? pull_up : pull_down); }
+bool PY32IOExpander_Class::setHighImpedance(uint8_t pin, bool enable) { return _setHighImpedance(pin, enable); }
+bool PY32IOExpander_Class::digitalWrite(uint8_t pin, bool level) { return _digitalWrite(pin, level); }
+bool PY32IOExpander_Class::resetIrq() { return _resetIrq(); }
+bool PY32IOExpander_Class::disableIrq() { return _disableIrq(); }
+bool PY32IOExpander_Class::enableIrq() { return _enableIrq(); }
+#else
+void PY32IOExpander_Class::setDirection(uint8_t pin, bool direction) { _setDirection(pin, direction); }
+// mode: false=down, true=up
+void PY32IOExpander_Class::setPullMode(uint8_t pin, bool mode) { _setPullMode(pin, mode ? pull_up : pull_down); }
+bool PY32IOExpander_Class::setPullMode(uint8_t pin, gpio_pull_t mode) { return _setPullMode(pin, mode); }
+void PY32IOExpander_Class::setHighImpedance(uint8_t pin, bool enable) { _setHighImpedance(pin, enable); }
+void PY32IOExpander_Class::digitalWrite(uint8_t pin, bool level) { _digitalWrite(pin, level); }
+void PY32IOExpander_Class::resetIrq() { _resetIrq(); }
+void PY32IOExpander_Class::disableIrq() { _disableIrq(); }
+void PY32IOExpander_Class::enableIrq() { _enableIrq(); }
+#endif
 
 uint16_t PY32IOExpander_Class::readDeviceUID()
 {
